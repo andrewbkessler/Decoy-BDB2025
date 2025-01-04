@@ -7,16 +7,7 @@ games <- read_csv(here("data", "games.csv"))
 plays <- read_csv(here("data", "plays.csv"))
 players <- read_csv(here("data", "players.csv"))
 player_plays <- read_csv(here("data", "player_play.csv"))
-motion_tracking <- read_csv(here("data", "motion_tracking.csv"))
 plays_mod <- read_csv(here("data", "plays_mod.csv"))
-# tracking <- rbind(
-#   read_csv(here("data", "tracking_week_1.csv")),
-#   read_csv(here("data", "tracking_week_2.csv")),
-#   read_csv(here("data", "tracking_week_3.csv")),
-#   read_csv(here("data", "tracking_week_4.csv")),
-#   read_csv(here("data", "tracking_week_5.csv"))
-#   )
-# tracking <- read_csv(here("data", "tracking_week_1.csv"))
 tracking <- here("data") |>
   list.files() |>
   str_subset("tracking_week_") |>
@@ -42,31 +33,30 @@ plays <- plays |>
   mutate(targetX = ifelse(playDirection == "left", 120 - targetX, targetX),
          targetY = ifelse(playDirection == "left", 160 / 3 - targetY, targetY))
 
-# ### Motion Manual Checks
-# motion_check <- data.frame(gameId = integer(), playId = integer(), nflId = integer(), displayName = character(), max_s = numeric(), tot_dis = numeric(), motion_check = logical())
-# ### loop through tracking data, calculate inMotionAtBallSnap
-# for (i in 1:9) {
-#   tracking_fix <- read_csv(here("data", paste0("tracking_week_",i,".csv")))
-#   snap_frames <- tracking_fix |>
-#     filter(frameType=='SNAP') |>
-#     distinct(gameId,playId,frameId) |> rename(snapFrameId = frameId)
-#   temp_tracking <- tracking_fix |>
-#     left_join(snap_frames,by=c('gameId','playId')) |>
-#     filter(snapFrameId-frameId<5 & snapFrameId>=frameId)
-#   motion_check_temp <- temp_tracking |>
-#     group_by(gameId, playId, nflId, displayName) |>
-#     summarise(max_s = max(s), tot_dis = sum(dis)) |>
-#     mutate(motion_check = ifelse(max_s>.62 & tot_dis>=1.2, TRUE, FALSE))
-#   motion_check <- rbind(motion_check, motion_check_temp)
-# }
-# player_plays_correct <- player_plays |> 
-#   left_join(select(motion_check, gameId, playId, nflId, motion_check), by=c('gameId','playId','nflId')) |> 
-#   mutate(motion_check = ifelse(is.na(inMotionAtBallSnap),NA,motion_check))
-# # write_csv(player_plays_correct, "data/player_plays_correct.csv")
-# rm(tracking_fix, snap_frames, temp_tracking, motion_check_temp, motion_check)
-player_plays_correct <- read_csv("data/player_plays_correct.csv")
+### Manually determine if player in motion at snap
+### Make a blank dataframe to place data
+motion_check <- data.frame(gameId = integer(), playId = integer(), nflId = integer(), displayName = character(), max_s = numeric(), tot_dis = numeric(), motion_check = logical())
+### loop through tracking data, calculate inMotionAtBallSnap
+for (i in 1:9) {
+  tracking_fix <- read_csv(here("data", paste0("tracking_week_",i,".csv")))
+  snap_frames <- tracking_fix |>
+    filter(frameType=='SNAP') |>
+    distinct(gameId,playId,frameId) |> rename(snapFrameId = frameId)
+  temp_tracking <- tracking_fix |>
+    left_join(snap_frames,by=c('gameId','playId')) |>
+    filter(snapFrameId-frameId<5 & snapFrameId>=frameId)
+  motion_check_temp <- temp_tracking |>
+    group_by(gameId, playId, nflId, displayName) |>
+    summarise(max_s = max(s), tot_dis = sum(dis)) |>
+    mutate(motion_check = ifelse(max_s>.62 & tot_dis>=1.2, TRUE, FALSE))
+  motion_check <- rbind(motion_check, motion_check_temp)
+}
+player_plays_correct <- player_plays |>
+  left_join(select(motion_check, gameId, playId, nflId, motion_check), by=c('gameId','playId','nflId')) |>
+  mutate(motion_check = ifelse(is.na(inMotionAtBallSnap),NA,motion_check))
+rm(tracking_fix, snap_frames, temp_tracking, motion_check_temp, motion_check)
 
-### Filter only motion plays
+### Get only motion plays
 motion_plays <- player_plays_correct |> 
   filter(motion_check==TRUE) |> 
   distinct(gameId, playId) |>
@@ -84,13 +74,13 @@ qb_scrambles_sacks <- plays |>
   filter(passResult %in% c('R','S')) |> 
   mutate(unique_play_id = paste(gameId, playId, sep = "-"))
 
-### Double Motion Plays to filter out
+### Find Double Motion Plays to filter out
 double_motion_plays <- motion_player_plays |> 
   group_by(gameId, playId) |> tally(sort = TRUE) |> 
   filter(n>1) |> 
   mutate(unique_play_id = paste(gameId, playId, sep = "-"))
 
-### Aborted Plays to filter out
+### Find Aborted Plays to filter out
 aborted_plays <- plays |> 
   filter(grepl('(Aborted)', playDescription)>0) |> 
   mutate(unique_play_id = paste(gameId, playId, sep = "-"))
@@ -110,8 +100,8 @@ motion_tracking <- tracking |>
   mutate(unique_play_id = paste(gameId, playId, sep = "-")) |> 
   filter(unique_play_id %in% motion_plays$unique_play_id)
 rm(tracking)
-
-############ Resume here to bypass long steps
+### Uncomment row below to save tracking data (to be used in different script)
+# write_csv(motion_tracking, "data/motion_tracking.csv")
 
 ### Label Tackle Box
 tackle_tracking_at_snap <- motion_tracking |>
@@ -155,55 +145,26 @@ motion_types <- motion_at_snap |>
          motion_type = ifelse(is_jet=='N',paste(motion_side, motion_direction, sep = '-'),paste0('Jet-',jet_side)))
 
 ### Get all non-motion players positions at snap & label left-to-right
-### Filter out the Center and closest 2 Guards
+### Filter out offensive lineman
 non_motion_at_snap <-  motion_tracking |> 
   mutate(player_play_id = paste(gameId, playId, nflId, sep = '-')) |>
-  # filter(!player_play_id %in% motion_player_plays$player_play_id &
-  #          displayName != 'football') |> 
   filter(!player_play_id %in% motion_player_plays$player_play_id) |> 
   filter(event=='ball_snap') |> 
   left_join(select(tackle_tracking_at_snap, player_play_id, dist_rank),by='player_play_id') |> 
-  # filter(!dist_rank %in% c(1,2,3)) |> 
   filter(!dist_rank %in% c(1,2,3,4,5)) |>
   group_by(gameId, playId, club) |> 
   mutate(player_label_num = rank(-y, ties.method = "random")) |> 
   ungroup() |> 
-  # left_join(select(plays, gameId, playId, possessionTeam),by=c('gameId','playId')) |> 
   left_join(select(plays_mod, gameId, playId, possessionTeam),by=c('gameId','playId')) |>
-  # mutate(off_def = ifelse(club==possessionTeam, 'O', 'D'),
-  #        player_label = paste0(off_def, player_label_num)) |>
   mutate(off_def = ifelse(displayName == 'football','fb',
                           ifelse(club==possessionTeam, 'O', 'D')),
          player_label = paste0(off_def, player_label_num)) |> 
   arrange(unique_play_id, club, -y)
 
-### DELETE AFTER -- USING for PICTURE COMP
-# w_line_at_snap <-  motion_tracking |> 
-#   mutate(player_play_id = paste(gameId, playId, nflId, sep = '-')) |>
-#   # filter(!player_play_id %in% motion_player_plays$player_play_id &
-#   #          displayName != 'football') |> 
-#   filter(!player_play_id %in% motion_player_plays$player_play_id) |> 
-#   filter(event=='ball_snap') |> 
-#   left_join(select(tackle_tracking_at_snap, player_play_id, dist_rank),by='player_play_id') |> 
-#   # filter(!dist_rank %in% c(1,2,3)) |> 
-#   # filter(!dist_rank %in% c(1,2,3,4,5)) |>
-#   group_by(gameId, playId, club) |> 
-#   mutate(player_label_num = rank(-y, ties.method = "random")) |> 
-#   ungroup() |> 
-#   # left_join(select(plays, gameId, playId, possessionTeam),by=c('gameId','playId')) |> 
-#   left_join(select(plays_mod, gameId, playId, possessionTeam),by=c('gameId','playId')) |>
-#   # mutate(off_def = ifelse(club==possessionTeam, 'O', 'D'),
-#   #        player_label = paste0(off_def, player_label_num)) |>
-#   mutate(off_def = ifelse(displayName == 'football','fb',
-#                           ifelse(club==possessionTeam, 'O', 'D')),
-#          player_label = paste0(off_def, player_label_num)) |> 
-#   arrange(unique_play_id, club, -y)
-
 ### Label motion player as decoy or not
-decoy_guide <- read_csv("decoy_guide.csv")
+decoy_guide <- read_csv("data/decoy_guide.csv")
 decoy_identifier <- motion_player_plays |> 
   select(gameId, playId, nflId, hadRushAttempt, wasTargettedReceiver) |> 
-  # left_join(select(plays, gameId, playId, targetY, rushLocationType),by=c('gameId','playId')) |> 
   left_join(select(plays_mod, gameId, playId, targetY, rushLocationType),by=c('gameId','playId')) |>
   left_join(select(motion_types, gameId, playId, nflId, left_tackle_y, right_tackle_y, motion_type),by=c('gameId','playId','nflId')) |> 
   mutate(pass_loc = ifelse(targetY>(2*53.3/3), 'left',
@@ -224,11 +185,6 @@ O_2 <- non_motion_at_snap |> filter(player_label=='O2') |> select(unique_play_id
 O_3 <- non_motion_at_snap |> filter(player_label=='O3') |> select(unique_play_id, x, y) |> rename(O3_x=x, O3_y=y)
 O_4 <- non_motion_at_snap |> filter(player_label=='O4') |> select(unique_play_id, x, y) |> rename(O4_x=x, O4_y=y)
 O_5 <- non_motion_at_snap |> filter(player_label=='O5') |> select(unique_play_id, x, y) |> rename(O5_x=x, O5_y=y)
-# O_6 <- non_motion_at_snap |> filter(player_label=='O6') |> select(unique_play_id, x, y) |> rename(O6_x=x, O6_y=y)
-# O_7 <- non_motion_at_snap |> filter(player_label=='O7') |> select(unique_play_id, x, y) |> rename(O7_x=x, O7_y=y)
-# O_8 <- non_motion_at_snap |> filter(player_label=='O8') |> select(unique_play_id, x, y) |> rename(O8_x=x, O8_y=y)
-# O_9 <- non_motion_at_snap |> filter(player_label=='O9') |> select(unique_play_id, x, y) |> rename(O9_x=x, O9_y=y)
-# O_10 <- non_motion_at_snap |> filter(player_label=='O10') |> select(unique_play_id, x, y) |> rename(O10_x=x, O10_y=y)
 D_1 <- non_motion_at_snap |> filter(player_label=='D1') |> select(unique_play_id, x, y) |> rename(D1_x=x, D1_y=y)
 D_2 <- non_motion_at_snap |> filter(player_label=='D2') |> select(unique_play_id, x, y) |> rename(D2_x=x, D2_y=y)
 D_3 <- non_motion_at_snap |> filter(player_label=='D3') |> select(unique_play_id, x, y) |> rename(D3_x=x, D3_y=y)
@@ -243,8 +199,7 @@ D_11 <- non_motion_at_snap |> filter(player_label=='D11') |> select(unique_play_
 fb <- non_motion_at_snap |> filter(displayName=='football') |> select(unique_play_id, x, y) |> rename(fb_x=x, fb_y=y)
 model_data <- motion_player |> 
   left_join(O_1,by='unique_play_id') |> left_join(O_2,by='unique_play_id') |> left_join(O_3,by='unique_play_id') |> 
-  left_join(O_4,by='unique_play_id') |> left_join(O_5,by='unique_play_id') |> #left_join(O_6,by='unique_play_id') |> 
-  #left_join(O_7,by='unique_play_id') |> 
+  left_join(O_4,by='unique_play_id') |> left_join(O_5,by='unique_play_id') |>
   left_join(D_1,by='unique_play_id') |> left_join(D_2,by='unique_play_id') |> 
   left_join(D_3,by='unique_play_id') |> left_join(D_4,by='unique_play_id') |> left_join(D_5,by='unique_play_id') |> 
   left_join(D_6,by='unique_play_id') |> left_join(D_7,by='unique_play_id') |> left_join(D_8,by='unique_play_id') |> 
@@ -252,34 +207,6 @@ model_data <- motion_player |>
   left_join(fb, by='unique_play_id') |> 
   left_join(select(decoy_identifier, unique_play_id, decoy),by='unique_play_id') |> filter(!is.na(decoy))
 rm(O_1, O_2, O_3, O_4, O_5, O_6, O_7, D_1, D_2, D_3, D_4, D_5, D_6, D_7, D_8, D_9, D_10, D_11, fb)
+### Uncomment row below to save model data (to be used in different script)
 # write_csv(model_data, "data/model_data_noOL_w_ball.csv")
 
-# ### Manually add play descriptions
-# plays <- plays |>
-#   mutate(unique_play_id = paste(gameId, playId, sep = "-"))
-# model_data <- read_csv("data/model_data_noOL_w_ball.csv") |> 
-#   relocate(decoy, .after = last_col())
-# model_data_new <- model_data |>
-#   left_join(select(plays, unique_play_id, down, yardsToGo, absoluteYardlineNumber),by='unique_play_id')
-# write_csv(model_data_new, "data/model_data_noOL_w_ball.csv")
-
-
-
-
-
-
-# motion_video_check <- motion_player_plays |>
-#   select(gameId, playId, nflId, teamAbbr) |>
-#   left_join(select(games, gameId, week),by='gameId') |>
-#   left_join(select(plays, gameId, playId, quarter, gameClock),by=c('gameId','playId')) |>
-#   left_join(select(players, nflId, displayName),by='nflId')
-### Motion Video Check
-motion_video_check <- read_csv("motion_video_check.csv") |> 
-  filter(teamAbbr=='JAX') |> 
-  left_join(select(decoy_identifier, gameId, playId, nflId, motion_type, rushLocationType, pass_loc, decoy),by=c('gameId','playId','nflId')) |> 
-  filter((videoDecoy=='Y' & decoy=='N') | (videoDecoy=='N' & decoy=='Y'))
-
-# test_play_check <- decoy_identifier |> 
-#   filter(gameId==2022091109 & playId==163)
-# test_motion_type <- motion_types |> 
-#   filter(gameId==2022091109 & playId==1499)

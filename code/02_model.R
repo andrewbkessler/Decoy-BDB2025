@@ -18,10 +18,6 @@ decoy_data_join <- read_csv("data/model_data_noOL_w_ball.csv") |>
 model_data <- decoy_data_join |> 
   select(-unique_play_id)
 
-### Creating factors
-# model_data$M_pos <- as.numeric(as.factor(model_data$M_pos))-1
-# model_data$down <- as.numeric(as.factor(model_data$down))-1
-
 ### Making train and test datasets
 smp_size <- floor(0.80 * nrow(model_data))
 set.seed(1997)
@@ -65,11 +61,9 @@ decoy_model <- xgb.train(data = gb_train,
 ### Variable importance
 vip(decoy_model)
 
-### Model Tree
-# xgb.plot.multi.trees(model = decoy_model, features_keep = 6)
+### Model Tree of best iteration
 tree_plot <- xgb.plot.tree(model = decoy_model, trees = decoy_model$best_iteration, plot_width = 1000, 
                            plot_height = 1000, render = FALSE)
-export_graph(tree_plot, "xgboost_tree_plot.pdf", width = 1000, height = 1000)
 
 # Extract tree information
 tree_info <- xgb.model.dt.tree(model = decoy_model)
@@ -89,19 +83,6 @@ print(logloss)
 test_accuracy <- mean(as.numeric(as.numeric(y_hat_valid > 0.5) == test_y))
 print(test_accuracy)
 
-### Prediction histograms
-# lst2 <- unlist(y_hat_valid, use.names = FALSE)
-# hist(lst2, labels = TRUE)
-# buckets <- data.frame(value = y_hat_valid)
-# hist(buckets$value, labels = TRUE, breaks = 10)
-# buckets <- buckets |>  mutate(bucket = cut(value, breaks = seq(0, ceiling(max(value)), by = 0.1), include.lowest = TRUE))
-# bucket_summary <- buckets |>  group_by(bucket) |>  summarise(num=n()) |> mutate(perc = 100*round(num/sum(num),2))
-
-### Accuracy by bucket
-# bucket_acc <- cbind(buckets, test_y) |> 
-#   mutate(correct = as.numeric(as.numeric(value > 0.5) == test_y)) |> 
-#   group_by(bucket, correct) |> summarise(num=n()) |> mutate(perc = 100*round(num/sum(num),2))
-
 ### Get decoy predictions
 decoy_preds <- as.data.frame(
   matrix(predict(decoy_model, as.matrix(model_data %>% select(-label))))
@@ -111,18 +92,12 @@ decoy_preds <- as.data.frame(
 ### Join predictions back to dataset
 decoy_projs <- cbind(select(decoy_data_join, unique_play_id, label), decoy_preds) |>
   rename(decoy = label)
+### Uncomment row below to save decoy projections (to be used in different script)
+# write_csv(test_projs, 'data/decoy_projs.csv')
 
 test_projs <- decoy_data_join[-sample, ] |> 
   select(unique_play_id, label) |> 
   cbind(y_hat_valid) |> 
   rename(decoy = label, decoy_odds = y_hat_valid)
-write_csv(test_projs, 'data/test_projs.csv')
-
-
-
-
-
-
-### File Save and Load (change # before saving)
-# xgb.save(decoy_model, 'saved_models/xgb.model.4')
-# decoy_model <- xgb.load('saved_models/xgb.model.4')
+### Uncomment row below to save test projections (to be used in different script)
+# write_csv(test_projs, 'data/test_projs.csv')
